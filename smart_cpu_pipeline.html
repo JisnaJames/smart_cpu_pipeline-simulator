@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart CPU Pipeline Simulator</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;font-family:Arial,sans-serif;
+  background:linear-gradient(135deg,#0f172a,#1e293b);
+  color:#e5e7eb;min-height:100vh
+}
+.container{max-width:1200px;margin:auto;padding:28px 18px}
+header{text-align:center;margin-bottom:24px}
+h1{margin:0;font-size:clamp(28px,5vw,44px)}
+.subtitle{color:#94a3b8;margin-top:8px}
+.card{
+  background:rgba(15,23,42,.9);border:1px solid #334155;
+  border-radius:16px;padding:20px;margin-bottom:18px;
+  box-shadow:0 10px 30px rgba(0,0,0,.2)
+}
+h2{margin-top:0}
+.instructions{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:10px;margin:12px 0
+}
+.row{display:flex;gap:8px;align-items:center}
+input{
+  width:100%;padding:11px;border-radius:9px;border:1px solid #475569;
+  background:#0f172a;color:#fff;font-size:15px
+}
+button{
+  border:0;border-radius:9px;padding:11px 16px;cursor:pointer;
+  background:#2563eb;color:white;font-weight:700
+}
+button.secondary{background:#475569}
+button.danger{background:#dc2626}
+button:disabled{opacity:.5;cursor:not-allowed}
+.controls{display:flex;gap:10px;flex-wrap:wrap}
+.error{color:#fca5a5;margin-top:8px}
+.stats{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px
+}
+.stat{background:#111827;border:1px solid #334155;border-radius:12px;padding:14px}
+.stat b{display:block;font-size:24px;margin-top:5px}
+.table-wrap{overflow:auto}
+table{border-collapse:collapse;width:100%;min-width:700px}
+th,td{border:1px solid #334155;padding:9px;text-align:center}
+th{background:#1e293b}
+.stage{font-weight:700;border-radius:6px;padding:5px}
+.IF{background:#2563eb}.ID{background:#7c3aed}.EX{background:#059669}
+.MEM{background:#d97706}.WB{background:#dc2626}
+.empty{color:#64748b}
+.hazard{
+  background:rgba(220,38,38,.12);border-left:4px solid #ef4444;
+  padding:10px;margin:8px 0;border-radius:7px
+}
+#pipeline{
+  overflow:auto;padding-bottom:8px
+}
+.grid{
+  display:grid;gap:3px;min-width:max-content
+}
+.cell{
+  width:82px;height:48px;border-radius:7px;display:flex;
+  justify-content:center;align-items:center;font-size:13px;font-weight:700;
+  border:1px solid #334155
+}
+.label{
+  width:130px;background:#111827;justify-content:flex-start;padding-left:10px
+}
+.cycle{height:34px;background:#1e293b}
+.active{outline:3px solid #f8fafc;transform:scale(1.03)}
+.stall{background:#78350f;color:#fde68a}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+.legend span{padding:6px 10px;border-radius:7px;font-size:13px}
+.note{color:#94a3b8;font-size:14px}
+footer{text-align:center;color:#64748b;padding:20px}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <h1>⚡ Smart CPU Pipeline Simulator</h1>
+  <div class="subtitle">Animated 5-stage pipeline • RAW hazard detection • Stall analysis</div>
+</header>
+
+<div class="card">
+  <h2>1. Enter Instructions</h2>
+  <p class="note">Format: <b>OP Source1 Source2 Destination</b> — e.g. <b>ADD R2 R3 R1</b></p>
+  <div id="inputs" class="instructions"></div>
+  <div class="controls">
+    <button onclick="addInstruction()">＋ Add Instruction</button>
+    <button onclick="loadExample()" class="secondary">Load Example</button>
+    <button onclick="simulate()">▶ Simulate</button>
+  </div>
+  <div id="error" class="error"></div>
+</div>
+
+<div class="card">
+  <h2>2. Animation Controls</h2>
+  <div class="controls">
+    <button id="play" onclick="playAnimation()" disabled>▶ Play</button>
+    <button id="pause" onclick="pauseAnimation()" class="secondary" disabled>⏸ Pause</button>
+    <button id="step" onclick="stepAnimation()" class="secondary" disabled>⏭ Step</button>
+    <button id="reset" onclick="resetAnimation()" class="danger" disabled>↺ Reset</button>
+  </div>
+  <p class="note">The highlighted cell is the instruction currently moving through the pipeline.</p>
+</div>
+
+<div class="card">
+  <h2>3. Performance Analysis</h2>
+  <div id="stats" class="stats"></div>
+</div>
+
+<div class="card">
+  <h2>4. RAW Hazard Analysis</h2>
+  <div id="hazards"><p class="note">Run the simulator to analyze hazards.</p></div>
+</div>
+
+<div class="card">
+  <h2>5. Animated Pipeline</h2>
+  <div id="cycleTitle" class="note">Run the simulator to start.</div>
+  <div id="pipeline"></div>
+  <div class="legend">
+    <span class="IF">IF — Instruction Fetch</span>
+    <span class="ID">ID — Instruction Decode</span>
+    <span class="EX">EX — Execute</span>
+    <span class="MEM">MEM — Memory</span>
+    <span class="WB">WB — Write Back</span>
+    <span class="stall">STALL — Hazard delay</span>
+  </div>
+</div>
+
+<footer>Smart 5-Stage CPU Pipeline Simulator</footer>
+</div>
+
+<script>
+const stages=["IF","ID","EX","MEM","WB"];
+let count=4, data=null, currentCycle=0, timer=null;
+
+function addInstruction(value=""){
+  const box=document.getElementById("inputs");
+  const div=document.createElement("div");
+  div.className="row";
+  div.innerHTML=`<input class="instruction" placeholder="ADD R2 R3 R1" value="${value}">
+                 <button class="danger" onclick="this.parentElement.remove()">×</button>`;
+  box.appendChild(div);
+}
+function loadExample(){
+  document.getElementById("inputs").innerHTML="";
+  ["ADD R2 R3 R1","SUB R1 R4 R5","MUL R5 R6 R7","AND R8 R9 R10"].forEach(addInstruction);
+}
+function getInstructions(){
+  return [...document.querySelectorAll(".instruction")].map(x=>x.value.trim().toUpperCase()).filter(Boolean);
+}
+function simulate(){
+  pauseAnimation();
+  const raw=getInstructions(), error=document.getElementById("error");
+  error.textContent="";
+  if(!raw.length){error.textContent="Enter at least one instruction.";return}
+  const inst=[];
+  for(let i=0;i<raw.length;i++){
+    const p=raw[i].split(/\s+/);
+    if(p.length!==4){error.textContent=`Instruction ${i+1} is invalid. Use: OP Source1 Source2 Destination`;return}
+    inst.push({op:p[0],src1:p[1],src2:p[2],dest:p[3]});
+  }
+
+  const hazards=[];
+  for(let i=0;i<inst.length;i++){
+    for(let j=0;j<i;j++){
+      if(inst[i].src1===inst[j].dest || inst[i].src2===inst[j].dest){
+        hazards.push({previous:j,current:i,register:inst[j].dest});
+      }
+    }
+  }
+
+  const start=inst.map((_,i)=>i);
+  hazards.forEach(h=>{
+    for(let k=h.current;k<inst.length;k++) start[k]++;
+  });
+
+  const total=start[start.length-1]+5;
+  const matrix=inst.map(()=>Array(total).fill("-"));
+  start.forEach((s,i)=>stages.forEach((st,j)=>matrix[i][s+j]=st));
+
+  data={inst,hazards,start,total,matrix};
+  currentCycle=0;
+  renderStats();
+  renderHazards();
+  renderPipeline();
+  ["play","pause","step","reset"].forEach(id=>document.getElementById(id).disabled=false);
+}
+function renderStats(){
+  const n=data.inst.length, normal=n*5, base=n+4, stalls=data.total-base;
+  const speed=normal/data.total;
+  document.getElementById("stats").innerHTML=`
+    <div class="stat">Instructions<b>${n}</b></div>
+    <div class="stat">Stages<b>5</b></div>
+    <div class="stat">Without Pipeline<b>${normal}</b></div>
+    <div class="stat">With Pipeline<b>${data.total}</b></div>
+    <div class="stat">Stall Cycles<b>${stalls}</b></div>
+    <div class="stat">Speedup<b>${speed.toFixed(2)}×</b></div>`;
+}
+function renderHazards(){
+  const box=document.getElementById("hazards");
+  if(!data.hazards.length){
+    box.innerHTML="<p>✅ No RAW hazards detected.</p>"; return;
+  }
+  box.innerHTML=data.hazards.map(h=>
+    `<div class="hazard">⚠️ <b>RAW Hazard:</b> I${h.current+1} depends on I${h.previous+1} through <b>${h.register}</b>. A stall is inserted.</div>`
+  ).join("");
+}
+function renderPipeline(){
+  const p=document.getElementById("pipeline");
+  let html=`<div class="grid" style="grid-template-columns:130px repeat(${data.total},82px)">`;
+  html+=`<div class="cell label cycle">Instruction</div>`;
+  for(let c=0;c<data.total;c++) html+=`<div class="cell cycle">C${c+1}</div>`;
+
+  data.matrix.forEach((row,i)=>{
+    html+=`<div class="cell label">I${i+1}: ${data.inst[i].op}</div>`;
+    row.forEach((st,c)=>{
+      let cls=st==="-"?"empty":st;
+      if(c===currentCycle && st!=="-") cls+=" active";
+      html+=`<div class="cell ${cls}">${st==="-"?"":st}</div>`;
+    });
+  });
+  html+="</div>";
+  p.innerHTML=html;
+  document.getElementById("cycleTitle").textContent=
+    `⏱ Current Clock Cycle: C${currentCycle+1} / C${data.total}`;
+}
+function stepAnimation(){
+  if(!data)return;
+  if(currentCycle<data.total-1){currentCycle++;renderPipeline();}
+  else pauseAnimation();
+}
+function playAnimation(){
+  if(!data)return;
+  clearInterval(timer);
+  timer=setInterval(()=>{
+    if(currentCycle>=data.total-1){pauseAnimation();return}
+    currentCycle++;renderPipeline();
+  },900);
+}
+function pauseAnimation(){clearInterval(timer);timer=null}
+function resetAnimation(){
+  pauseAnimation();
+  if(data){currentCycle=0;renderPipeline();}
+}
+loadExample();
+</script>
+</body>
+</html>
